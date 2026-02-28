@@ -12,3 +12,10 @@ GSIR Deterministic Core – Authority Contract
    - git_commit
    - schema_version
    - UTC timestamp
+
+Execution Rules:
+
+- Timezone: UTC only
+- Randomness: forbidden unless fixed seed
+- Current system time must not affect output determinism
+- No reliance on system locale
