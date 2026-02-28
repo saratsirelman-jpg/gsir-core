@@ -1,0 +1,11 @@
+task_type: create_registry_schema
+schema_version: "1.0.0"
+inputs:
+  fields:
+    - name: source_id
+      type: string
+    - name: timestamp
+      type: string
+metadata:
+  author: "agent"
+  description: "Initial registry schema"
