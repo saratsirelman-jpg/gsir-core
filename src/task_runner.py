@@ -6,7 +6,7 @@ import hashlib
 from datetime import datetime, timezone
 import subprocess
 
-
+TRANSFORM_VERSION = "v1"
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPECS_DIR = os.path.join(BASE_DIR, "specs")
 REGISTRY_DIR = os.path.join(BASE_DIR, "registry")
@@ -49,8 +49,22 @@ def deterministic_transform(spec: dict) -> dict:
     }
 
 
-def write_registry_artifact(output_data: dict):
-    serialized = json.dumps(output_data, sort_keys=True, separators=(",", ":"))
+def write_registry_artifact(
+    output_payload: dict,
+    spec_hash: str,
+    input_hash: str
+):
+    git_commit = get_git_commit()
+
+    artifact = {
+        "spec_hash": spec_hash,
+        "input_hash": input_hash,
+        "produced_by_commit": git_commit,
+        "transform_version": TRANSFORM_VERSION,
+        "payload": output_payload
+    }
+
+    serialized = json.dumps(artifact, sort_keys=True, separators=(",", ":"))
     output_hash = sha256_of_string(serialized)
 
     filename = f"{output_hash}.json"
@@ -98,7 +112,13 @@ def main():
     input_hash = sha256_of_string(spec_serialized)
 
     output_data = deterministic_transform(spec)
-    output_hash, _ = write_registry_artifact(output_data)
+    spec_hash = sha256_of_string(spec_filename)
+
+output_hash, _ = write_registry_artifact(
+    output_payload=output_data,
+    spec_hash=spec_hash,
+    input_hash=input_hash
+)
 
     write_metadata(spec_filename, input_hash, output_hash)
 
