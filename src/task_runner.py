@@ -6,7 +6,9 @@ import hashlib
 from datetime import datetime, timezone
 import subprocess
 
+
 TRANSFORM_VERSION = "v1"
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPECS_DIR = os.path.join(BASE_DIR, "specs")
 REGISTRY_DIR = os.path.join(BASE_DIR, "registry")
@@ -20,7 +22,8 @@ def sha256_of_string(data: str) -> str:
 def get_git_commit():
     try:
         result = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=BASE_DIR
+            ["git", "rev-parse", "HEAD"],
+            cwd=BASE_DIR
         )
         return result.decode("utf-8").strip()
     except Exception:
@@ -29,6 +32,7 @@ def get_git_commit():
 
 def load_spec(spec_filename: str):
     spec_path = os.path.join(SPECS_DIR, spec_filename)
+
     if not os.path.exists(spec_path):
         raise FileNotFoundError(f"Spec not found: {spec_filename}")
 
@@ -112,18 +116,19 @@ def main():
     input_hash = sha256_of_string(spec_serialized)
 
     output_data = deterministic_transform(spec)
+
     spec_hash = sha256_of_string(spec_filename)
 
-output_hash, _ = write_registry_artifact(
-    output_payload=output_data,
-    spec_hash=spec_hash,
-    input_hash=input_hash
-)
+    output_hash, _ = write_registry_artifact(
+        output_payload=output_data,
+        spec_hash=spec_hash,
+        input_hash=input_hash
+    )
 
     write_metadata(spec_filename, input_hash, output_hash)
 
-    print(f"SUCCESS")
-    print(f"Input Hash:  {input_hash}")
+    print("SUCCESS")
+    print(f"Input Hash: {input_hash}")
     print(f"Output Hash: {output_hash}")
 
 
