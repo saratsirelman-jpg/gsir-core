@@ -56,9 +56,14 @@ def write_registry_artifact(output_data: dict):
     filename = f"{output_hash}.json"
     output_path = os.path.join(REGISTRY_DIR, filename)
 
-    if not os.path.exists(output_path):
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(serialized)
+    # STRICT APPEND-ONLY ENFORCEMENT
+    if os.path.exists(output_path):
+        raise RuntimeError(
+            "Registry violation: artifact already exists (append-only enforced)"
+        )
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(serialized)
 
     return output_hash, filename
 
