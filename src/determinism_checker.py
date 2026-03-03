@@ -89,16 +89,18 @@ def main():
         path = os.path.join(REGISTRY_DIR, filename)
 
         with open(path, "r", encoding="utf-8") as f:
-            stored_artifact = json.load(f)
+            artifact = json.load(f)
 
-        signature = stored_artifact.pop("signature", None)
-
+        signature = artifact.get("signature")
         if signature is None:
             continue
 
-        # Verify signature first
+        # Create a copy without signature for verification
+        artifact_copy = dict(artifact)
+        artifact_copy.pop("signature")
+
         serialized_without_sig = json.dumps(
-            stored_artifact,
+            artifact_copy,
             sort_keys=True,
             separators=(",", ":")
         ).encode()
@@ -108,18 +110,15 @@ def main():
         except InvalidSignature:
             raise RuntimeError("Signature verification failed — artifact tampered")
 
-        version = stored_artifact.get("transform_version")
-        payload = deterministic_transform(spec, version)
+        version = artifact_copy.get("transform_version")
 
-        reconstructed_core = {
-            "spec_hash": spec_hash,
-            "input_hash": input_hash,
-            "produced_by_commit": stored_artifact.get("produced_by_commit"),
-            "transform_version": version,
-            "payload": payload
-        }
+        expected_payload = deterministic_transform(spec, version)
 
-        if reconstructed_core == stored_artifact:
+        if (
+            artifact_copy.get("spec_hash") == spec_hash and
+            artifact_copy.get("input_hash") == input_hash and
+            artifact_copy.get("payload") == expected_payload
+        ):
             match_found = True
             print("Origin Determinism Verified")
             print("Signature Verified")
