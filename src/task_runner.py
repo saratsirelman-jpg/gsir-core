@@ -7,19 +7,23 @@ from datetime import datetime, timezone
 import subprocess
 
 
-# ---- CHANGE ACTIVE VERSION HERE ----
-TRANSFORM_VERSION = "v2"
-# ------------------------------------
-
-
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPECS_DIR = os.path.join(BASE_DIR, "specs")
 REGISTRY_DIR = os.path.join(BASE_DIR, "registry")
 METADATA_DIR = os.path.join(BASE_DIR, "build_metadata")
+VERSION_FILE = os.path.join(BASE_DIR, "transform_versions.json")
 
 
 def sha256_of_string(data: str) -> str:
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+def load_version_registry():
+    if not os.path.exists(VERSION_FILE):
+        raise RuntimeError("Version registry file missing")
+
+    with open(VERSION_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def get_git_commit():
@@ -55,7 +59,6 @@ def transform_v1(spec: dict) -> dict:
 
 
 def transform_v2(spec: dict) -> dict:
-    # v2 introduces deterministic field ordering marker
     return {
         "task_type": spec.get("task_type"),
         "schema_version": spec.get("schema_version"),
@@ -100,14 +103,12 @@ def write_registry_artifact(
     output_path = os.path.join(REGISTRY_DIR, filename)
 
     if os.path.exists(output_path):
-        raise RuntimeError(
-            "Registry violation: artifact already exists (append-only enforced)"
-        )
+        raise RuntimeError("Registry violation: artifact already exists")
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(serialized)
 
-    return output_hash, filename
+    return output_hash
 
 
 def write_metadata(spec_name: str, input_hash: str, output_hash: str):
@@ -132,18 +133,22 @@ def main():
         print("Usage: python task_runner.py <spec_filename>")
         sys.exit(1)
 
+    registry = load_version_registry()
+    version = registry["latest_version"]
+
+    if version not in registry["approved_versions"]:
+        raise RuntimeError("Transform version not approved in registry")
+
     spec_filename = sys.argv[1]
     spec = load_spec(spec_filename)
 
     spec_serialized = json.dumps(spec, sort_keys=True, separators=(",", ":"))
     input_hash = sha256_of_string(spec_serialized)
-
-    version = TRANSFORM_VERSION
-    output_data = deterministic_transform(spec, version)
-
     spec_hash = sha256_of_string(spec_filename)
 
-    output_hash, _ = write_registry_artifact(
+    output_data = deterministic_transform(spec, version)
+
+    output_hash = write_registry_artifact(
         output_payload=output_data,
         spec_hash=spec_hash,
         input_hash=input_hash,
@@ -154,7 +159,6 @@ def main():
 
     print("SUCCESS")
     print(f"Transform Version: {version}")
-    print(f"Input Hash: {input_hash}")
     print(f"Output Hash: {output_hash}")
 
 
