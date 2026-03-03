@@ -40,11 +40,9 @@ def load_spec(spec_filename: str):
         return yaml.safe_load(f)
 
 
-def deterministic_transform(spec: dict) -> dict:
-    """
-    Deterministic transformation of spec into registry artifact.
-    No randomness. No external calls.
-    """
+# -------- VERSIONED TRANSFORMS --------
+
+def transform_v1(spec: dict) -> dict:
     return {
         "task_type": spec.get("task_type"),
         "schema_version": spec.get("schema_version"),
@@ -53,10 +51,20 @@ def deterministic_transform(spec: dict) -> dict:
     }
 
 
+def deterministic_transform(spec: dict, version: str) -> dict:
+    if version == "v1":
+        return transform_v1(spec)
+
+    raise RuntimeError(f"Unsupported transform version: {version}")
+
+
+# -------- REGISTRY WRITE --------
+
 def write_registry_artifact(
     output_payload: dict,
     spec_hash: str,
-    input_hash: str
+    input_hash: str,
+    version: str
 ):
     git_commit = get_git_commit()
 
@@ -64,7 +72,7 @@ def write_registry_artifact(
         "spec_hash": spec_hash,
         "input_hash": input_hash,
         "produced_by_commit": git_commit,
-        "transform_version": TRANSFORM_VERSION,
+        "transform_version": version,
         "payload": output_payload
     }
 
@@ -74,7 +82,6 @@ def write_registry_artifact(
     filename = f"{output_hash}.json"
     output_path = os.path.join(REGISTRY_DIR, filename)
 
-    # STRICT APPEND-ONLY ENFORCEMENT
     if os.path.exists(output_path):
         raise RuntimeError(
             "Registry violation: artifact already exists (append-only enforced)"
@@ -115,14 +122,16 @@ def main():
     spec_serialized = json.dumps(spec, sort_keys=True, separators=(",", ":"))
     input_hash = sha256_of_string(spec_serialized)
 
-    output_data = deterministic_transform(spec)
+    version = TRANSFORM_VERSION
+    output_data = deterministic_transform(spec, version)
 
     spec_hash = sha256_of_string(spec_filename)
 
     output_hash, _ = write_registry_artifact(
         output_payload=output_data,
         spec_hash=spec_hash,
-        input_hash=input_hash
+        input_hash=input_hash,
+        version=version
     )
 
     write_metadata(spec_filename, input_hash, output_hash)
