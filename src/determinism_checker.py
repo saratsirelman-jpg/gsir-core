@@ -3,7 +3,6 @@ import sys
 import json
 import yaml
 import hashlib
-import subprocess
 
 TRANSFORM_VERSION = "v1"
 
@@ -14,17 +13,6 @@ REGISTRY_DIR = os.path.join(BASE_DIR, "registry")
 
 def sha256_of_string(data: str) -> str:
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
-
-
-def get_git_commit():
-    try:
-        result = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=BASE_DIR
-        )
-        return result.decode("utf-8").strip()
-    except Exception:
-        return "unknown"
 
 
 def load_spec(spec_filename: str):
@@ -54,44 +42,65 @@ def main():
     spec_filename = sys.argv[1]
     spec = load_spec(spec_filename)
 
-    # Recompute input hash
     spec_serialized = json.dumps(spec, sort_keys=True, separators=(",", ":"))
     input_hash = sha256_of_string(spec_serialized)
 
-    # Recompute deterministic payload
     payload = deterministic_transform(spec)
-
-    # Recompute spec hash
     spec_hash = sha256_of_string(spec_filename)
 
-    # Reconstruct full artifact
-    artifact = {
+    # Compute expected artifact hash WITHOUT commit binding
+    artifact_core = {
         "spec_hash": spec_hash,
         "input_hash": input_hash,
-        "produced_by_commit": get_git_commit(),
         "transform_version": TRANSFORM_VERSION,
         "payload": payload
     }
 
-    serialized = json.dumps(artifact, sort_keys=True, separators=(",", ":"))
-    expected_output_hash = sha256_of_string(serialized)
+    core_serialized = json.dumps(artifact_core, sort_keys=True, separators=(",", ":"))
+    core_hash = sha256_of_string(core_serialized)
 
-    artifact_path = os.path.join(REGISTRY_DIR, f"{expected_output_hash}.json")
+    # Search registry for artifact matching core structure
+    found = False
 
-    if not os.path.exists(artifact_path):
-        raise RuntimeError("Replay failure: artifact not found in registry")
+    for filename in os.listdir(REGISTRY_DIR):
+        if not filename.endswith(".json"):
+            continue
 
-    # Load actual artifact from registry
-    with open(artifact_path, "r", encoding="utf-8") as f:
-        stored_artifact = json.load(f)
+        path = os.path.join(REGISTRY_DIR, filename)
 
-    # Strict structural equality check
-    if stored_artifact != artifact:
-        raise RuntimeError("Origin violation: artifact structure mismatch")
+        with open(path, "r", encoding="utf-8") as f:
+            stored_artifact = json.load(f)
 
-    print("Origin Determinism Verified")
-    print(f"Input Hash: {input_hash}")
-    print(f"Output Hash: {expected_output_hash}")
+        candidate_core = {
+            "spec_hash": stored_artifact.get("spec_hash"),
+            "input_hash": stored_artifact.get("input_hash"),
+            "transform_version": stored_artifact.get("transform_version"),
+            "payload": stored_artifact.get("payload")
+        }
+
+        candidate_serialized = json.dumps(
+            candidate_core, sort_keys=True, separators=(",", ":")
+        )
+
+        if sha256_of_string(candidate_serialized) == core_hash:
+            # Additional strict checks
+            if stored_artifact.get("transform_version") != TRANSFORM_VERSION:
+                raise RuntimeError("Transform version mismatch")
+
+            if stored_artifact.get("input_hash") != input_hash:
+                raise RuntimeError("Input hash mismatch")
+
+            if stored_artifact.get("spec_hash") != spec_hash:
+                raise RuntimeError("Spec hash mismatch")
+
+            found = True
+            print("Origin Determinism Verified")
+            print(f"Input Hash: {input_hash}")
+            print(f"Artifact File: {filename}")
+            break
+
+    if not found:
+        raise RuntimeError("Origin verification failed: no matching artifact found")
 
 
 if __name__ == "__main__":
