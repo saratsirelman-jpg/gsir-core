@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 import subprocess
 
 
-TRANSFORM_VERSION = "v1"
+# ---- CHANGE ACTIVE VERSION HERE ----
+TRANSFORM_VERSION = "v2"
+# ------------------------------------
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPECS_DIR = os.path.join(BASE_DIR, "specs")
@@ -51,9 +54,23 @@ def transform_v1(spec: dict) -> dict:
     }
 
 
+def transform_v2(spec: dict) -> dict:
+    # v2 introduces deterministic field ordering marker
+    return {
+        "task_type": spec.get("task_type"),
+        "schema_version": spec.get("schema_version"),
+        "inputs": spec.get("inputs"),
+        "normalized": True,
+        "migration_level": 2
+    }
+
+
 def deterministic_transform(spec: dict, version: str) -> dict:
     if version == "v1":
         return transform_v1(spec)
+
+    if version == "v2":
+        return transform_v2(spec)
 
     raise RuntimeError(f"Unsupported transform version: {version}")
 
@@ -116,7 +133,6 @@ def main():
         sys.exit(1)
 
     spec_filename = sys.argv[1]
-
     spec = load_spec(spec_filename)
 
     spec_serialized = json.dumps(spec, sort_keys=True, separators=(",", ":"))
@@ -137,6 +153,7 @@ def main():
     write_metadata(spec_filename, input_hash, output_hash)
 
     print("SUCCESS")
+    print(f"Transform Version: {version}")
     print(f"Input Hash: {input_hash}")
     print(f"Output Hash: {output_hash}")
 
