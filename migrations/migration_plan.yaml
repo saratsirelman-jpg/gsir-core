@@ -1,0 +1,6 @@
+current_latest: v2
+allowed_migrations:
+  - from: v1
+    to: v2
+    function: migrate_v1_to_v2
+    assertion: "v1 artifact core -> v2 payload adds migration_level=2 without changing semantic fields"
