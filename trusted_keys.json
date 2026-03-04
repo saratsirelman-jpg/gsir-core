@@ -1,0 +1,10 @@
+{ 
+  "trusted_keys": [ 
+    { 
+      "key_id": "local-dev-1" , 
+      "signature_alg": "RSASSA-PKCS1v15-SHA256" , 
+      "public_key_path": "keys/public_key.pem" , 
+      "public_key_fingerprint_sha256": "fe16f9c935e3f7dad005c63ec8fd0c74e48a2ea47707dd0e49cc85aefe727d4a" 
+    } 
+  ] 
+}
