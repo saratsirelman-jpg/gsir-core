@@ -1,0 +1,56 @@
+name: GSIR Determinism Gates
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install locked deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+
+      - name: Sanity compile
+        run: |
+          python -m compileall src
+
+      - name: Enforce registry immutability (only additions)
+        if: github.event_name == 'pull_request'
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.sha }}"
+          echo "Diff: $BASE_SHA -> $HEAD_SHA"
+          git diff --name-status "$BASE_SHA" "$HEAD_SHA" > diff.txt
+          cat diff.txt
+          # Fail if registry files are modified/deleted/renamed
+          if grep -E '^(M|D|R)[[:space:]]+registry/' diff.txt; then
+            echo "Registry immutability violated (only additions allowed)."
+            exit 1
+          fi
+
+      - name: Verify transform version registry consistency
+        run: |
+          python - << 'PY'
+          import json
+          d=json.load(open("transform_versions.json","r",encoding="utf-8"))
+          assert "approved_versions" in d and "latest_version" in d
+          assert d["latest_version"] in d["approved_versions"]
+          print("transform_versions.json OK")
+          PY
+
+      - name: Determinism + signature gate
+        run: |
+          python src/determinism_checker.py task_schema.yaml
