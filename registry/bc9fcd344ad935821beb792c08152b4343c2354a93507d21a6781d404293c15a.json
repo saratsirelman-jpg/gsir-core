@@ -1,0 +1,1 @@
+{"inputs":{"fields":[{"name":"source_id","type":"string"},{"name":"timestamp","type":"string"}]},"normalized":true,"schema_version":"1.0.0","task_type":"create_registry_schema"}
