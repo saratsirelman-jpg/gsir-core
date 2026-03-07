@@ -4,7 +4,7 @@
       "key_id": "local-dev-1" , 
       "signature_alg": "RSASSA-PKCS1v15-SHA256" , 
       "public_key_path": "keys/public_key.pem" , 
-      "public_key_fingerprint_sha256": "f76120b1e2571f45012ee1e7c54472b498f759e17b9e386cf6dadd5e5d6a4b48" 
+      "public_key_fingerprint_sha256": "37b08dce61791be0525db8ff419c438b8edf676016f4c21aba3db24560938cdd" 
     } 
   ] 
 }
