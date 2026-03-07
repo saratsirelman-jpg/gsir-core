@@ -58,8 +58,6 @@ def verify_signature(pub_key, data: bytes, signature_hex: str):
     pub_key.verify(sig, data, padding.PKCS1v15(), hashes.SHA256())
 
 
-# --- versioned transforms must match task_runner versions ---
-
 def transform_v1(spec: dict) -> dict:
     return {
         "task_type": spec.get("task_type"),
@@ -87,6 +85,40 @@ def deterministic_transform(spec: dict, version: str) -> dict:
     raise RuntimeError(f"Unsupported transform version: {version}")
 
 
+def build_expected_core_for_standard_artifact(stored: dict, spec: dict, spec_filename: str, deps_lock_hash: str):
+    version = stored.get("transform_version")
+    payload = deterministic_transform(spec, version)
+
+    return {
+        "canonicalization": stored.get("canonicalization"),
+        "spec_hash": canonical_sha256_hex({"spec_filename": spec_filename}),
+        "input_hash": canonical_sha256_hex(spec),
+        "transform_version": version,
+        "payload": payload,
+        "environment_hash": stored.get("environment_hash"),
+        "deps_lock_hash": deps_lock_hash,
+        "code_tree_hash": stored.get("code_tree_hash"),
+        "produced_by_commit": stored.get("produced_by_commit"),
+    }
+
+
+def build_expected_core_for_migrated_artifact(stored: dict, deps_lock_hash: str):
+    return {
+        "canonicalization": stored.get("canonicalization"),
+        "spec_hash": stored.get("spec_hash"),
+        "input_hash": stored.get("input_hash"),
+        "transform_version": stored.get("transform_version"),
+        "payload": stored.get("payload"),
+        "environment_hash": stored.get("environment_hash"),
+        "deps_lock_hash": deps_lock_hash,
+        "code_tree_hash": stored.get("code_tree_hash"),
+        "produced_by_commit": stored.get("produced_by_commit"),
+        "migrated_from_artifact_id": stored.get("migrated_from_artifact_id"),
+        "migration_chain": stored.get("migration_chain"),
+        "timestamp_utc": stored.get("timestamp_utc"),
+    }
+
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: python src\\determinism_checker.py <spec_filename>")
@@ -96,13 +128,12 @@ def main():
     spec = load_spec(spec_filename)
 
     if not os.path.exists(LOCK_FILE):
-        raise RuntimeError("requirements.lock missing (deps must be locked)")
+        raise RuntimeError("requirements.lock missing")
     deps_lock_hash = sha256_file_hex(LOCK_FILE)
 
-    spec_hash = canonical_sha256_hex({"spec_filename": spec_filename})
-    input_hash = canonical_sha256_hex(spec)
+    target_spec_hash = canonical_sha256_hex({"spec_filename": spec_filename})
+    target_input_hash = canonical_sha256_hex(spec)
 
-    # Look for a matching signed artifact
     for fname in os.listdir(REGISTRY_DIR):
         if not fname.endswith(".json"):
             continue
@@ -111,24 +142,19 @@ def main():
         with open(path, "rb") as f:
             stored_bytes = f.read()
 
-        # Stored file is canonical JSON bytes by contract
         stored = json.loads(stored_bytes.decode("utf-8"))
 
-        # must be signed
         signature = stored.get("signature")
         key_id = stored.get("key_id")
         if not signature or not key_id:
             continue
 
         entry = trusted_entry_for(key_id)
-
-        # Fingerprint check
-        expected_fp = entry.get("public_key_fingerprint_sha256", "")
         pub_path = entry.get("public_key_path")
-        if not expected_fp or not pub_path:
+        expected_fp = entry.get("public_key_fingerprint_sha256")
+        if not pub_path or not expected_fp:
             raise RuntimeError("trusted_keys.json entry incomplete")
 
-        # load public key and validate fingerprint
         pub_abs = os.path.join(BASE_DIR, pub_path)
         actual_fp = sha256_file_hex(pub_abs)
         if actual_fp != expected_fp:
@@ -136,46 +162,44 @@ def main():
 
         pub_key = load_public_key(pub_path)
 
-        # Reconstruct artifact_core (what was signed)
-        version = stored.get("transform_version")
-        payload = deterministic_transform(spec, version)
+        # Decide artifact type
+        is_migrated = "migrated_from_artifact_id" in stored
 
-        artifact_core = {
-            "canonicalization": stored.get("canonicalization"),
-            "spec_hash": stored.get("spec_hash"),
-            "input_hash": stored.get("input_hash"),
-            "transform_version": stored.get("transform_version"),
-            "payload": stored.get("payload"),
-            "environment_hash": stored.get("environment_hash"),
-            "deps_lock_hash": stored.get("deps_lock_hash"),
-            "code_tree_hash": stored.get("code_tree_hash"),
-            "produced_by_commit": stored.get("produced_by_commit"),
-        }
+        if is_migrated:
+            expected_core = build_expected_core_for_migrated_artifact(stored, deps_lock_hash)
+        else:
+            expected_core = build_expected_core_for_standard_artifact(
+                stored, spec, spec_filename, deps_lock_hash
+            )
 
-        # Verify core hash/signature
-        core_bytes = canonical_json_bytes(artifact_core)
+        expected_core_bytes = canonical_json_bytes(expected_core)
+
         try:
-            verify_signature(pub_key, core_bytes, signature)
+            verify_signature(pub_key, expected_core_bytes, signature)
         except InvalidSignature:
             raise RuntimeError(f"Signature invalid for artifact {fname}")
 
-        # Verify artifact_id matches core bytes
-        computed_id = hashlib.sha256(core_bytes).hexdigest()
+        computed_id = hashlib.sha256(expected_core_bytes).hexdigest()
         if stored.get("artifact_id") != computed_id:
             raise RuntimeError(f"artifact_id mismatch for {fname}")
 
-        # Origin checks (canonical hashes + deps lock)
-        if stored.get("spec_hash") != spec_hash:
+        # Origin match for current spec
+        if stored.get("spec_hash") != target_spec_hash:
             continue
-        if stored.get("input_hash") != input_hash:
-            continue
-        if stored.get("payload") != payload:
+        if stored.get("input_hash") != target_input_hash:
             continue
         if stored.get("deps_lock_hash") != deps_lock_hash:
-            raise RuntimeError("deps_lock_hash mismatch (environment drift)")
+            raise RuntimeError("deps_lock_hash mismatch")
+
+        if not is_migrated:
+            expected_payload = deterministic_transform(spec, stored.get("transform_version"))
+            if stored.get("payload") != expected_payload:
+                continue
 
         print("Origin Determinism Verified")
         print("Signature Verified")
+        if is_migrated:
+            print("Migration Verified")
         print(f"Artifact File: {fname}")
         print(f"artifact_id: {computed_id}")
         return
