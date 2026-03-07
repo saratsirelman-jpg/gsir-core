@@ -1,0 +1,89 @@
+name: GSIR Determinism Gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  determinism-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+
+      - name: Compile Python sources
+        run: |
+          python -m compileall src migrations tests
+
+      - name: Validate transform version registry
+        run: |
+          python - << 'PY'
+          import json
+          with open("transform_versions.json", "r", encoding="utf-8") as f:
+              d = json.load(f)
+
+          assert "approved_versions" in d, "Missing approved_versions"
+          assert "latest_version" in d, "Missing latest_version"
+          assert d["latest_version"] in d["approved_versions"], "latest_version must be approved"
+
+          print("transform_versions.json is valid")
+          PY
+
+      - name: Validate migration plan consistency
+        run: |
+          python - << 'PY'
+          import json
+          import yaml
+
+          with open("transform_versions.json", "r", encoding="utf-8") as f:
+              tv = json.load(f)
+
+          with open("migrations/migration_plan.yaml", "r", encoding="utf-8") as f:
+              mp = yaml.safe_load(f)
+
+          assert mp["current_latest"] == tv["latest_version"], \
+              "migration_plan current_latest must equal transform_versions latest_version"
+
+          approved = set(tv["approved_versions"])
+
+          for m in mp.get("allowed_migrations", []):
+              assert m["from"] in approved, f"Unapproved migration source version: {m['from']}"
+              assert m["to"] in approved, f"Unapproved migration target version: {m['to']}"
+
+          print("migration_plan.yaml is consistent")
+          PY
+
+      - name: Run migration tests
+        run: |
+          pytest -q
+
+      - name: Verify deterministic signed artifact
+        run: |
+          python src/determinism_checker.py task_schema.yaml
+
+      - name: Enforce registry immutability on pull requests
+        if: github.event_name == 'pull_request'
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.sha }}"
+
+          git diff --name-status "$BASE_SHA" "$HEAD_SHA" > diff.txt
+          cat diff.txt
+
+          if grep -E '^(M|D|R)[[:space:]]+registry/' diff.txt; then
+            echo "Registry immutability violated: existing registry artifacts must not be modified, deleted, or renamed."
+            exit 1
+          fi
